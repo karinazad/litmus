@@ -1,6 +1,6 @@
 """Task registry for Litmus benchmark."""
 
-from litmus.tasks._base import TaskConfig
+from litmus.tasks._base import Framing, TaskConfig
 from litmus.tasks.calm import register_calm_tasks
 from litmus.tasks.moleculeace import register_moleculeace_tasks
 from litmus.tasks.peer import register_peer_tasks
@@ -24,7 +24,7 @@ def build_registry() -> dict[str, TaskConfig]:
 
 def get_tasks(
     filter_str: str | None = None,
-    framing: str | None = None,
+    framing: Framing | None = None,
 ) -> list[TaskConfig]:
     """Get tasks matching optional filter and framing constraints.
 
@@ -32,7 +32,7 @@ def get_tasks(
     ----------
     filter_str : str | None
         Comma-separated task name prefixes, e.g. "peer:fluorescence,calm".
-    framing : str | None
+    framing : Framing | None
         If set, only return tasks with this framing (e.g. "regression", "binary", "binned").
 
     Returns

@@ -21,14 +21,14 @@ def main() -> None:
 @click.option("--model", required=True, help="Model name: HF model ID, local path, or API model name")
 @click.option(
     "--backend",
-    type=click.Choice(["api", "vllm"]),
+    type=click.Choice(["api", "azure", "vllm"]),
     default=None,
-    help="Backend to use. If omitted, auto-detects: uses 'api' when --base-url or --api-key is set, otherwise 'vllm'.",
+    help="Backend to use. If omitted, auto-detects: 'azure' when AZURE_OPENAI_ENDPOINT is set, 'api' when --base-url or --api-key is set, otherwise 'vllm'.",
 )
 @click.option("--base-url", default=None, help="API base URL (implies --backend api)")
 @click.option("--api-key", default=None, help="API key (implies --backend api, default: OPENAI_API_KEY env var)")
 @click.option("--tasks", "task_filter", default=None, help="Comma-separated task prefixes")
-@click.option("--framing", default=None, help="Filter by framing: regression, binary, binned")
+@click.option("--framing", default=None, type=click.Choice(["regression", "binary", "binned", "multiclass", "multilabel"]), help="Filter by framing")
 @click.option("--max-examples", default=None, type=int, help="Max examples per task")
 @click.option("--max-concurrent", default=10, type=int, help="Max concurrent API requests (api backend)")
 @click.option("--temperature", default=0.0, type=float, help="Sampling temperature")
@@ -73,14 +73,26 @@ def eval(
 
     # Auto-detect backend
     if backend is None:
-        if base_url or api_key:
+        import os
+        if os.environ.get("AZURE_OPENAI_ENDPOINT"):
+            backend = "azure"
+        elif base_url or api_key:
             backend = "api"
         else:
             backend = "vllm"
 
     click.echo(f"Running {len(tasks)} task(s) with model {model} (backend: {backend})")
 
-    if backend == "api":
+    if backend == "azure":
+        from litmus.model import AzureModel
+
+        llm = AzureModel(
+            model=model,
+            max_concurrent=max_concurrent,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+    elif backend == "api":
         from litmus.model import APIModel
 
         llm = APIModel(

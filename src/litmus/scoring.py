@@ -1,5 +1,7 @@
 """Scoring functions for Litmus benchmark."""
 
+from typing import Literal
+
 import numpy as np
 from scipy import stats
 from sklearn.metrics import (
@@ -48,7 +50,7 @@ def score_regression(
 def score_classification(
     targets: list[str],
     predictions: list[str],
-    task_type: str,
+    task_type: Literal["binary", "multiclass"],
     choices: list[str] | None = None,
 ) -> dict[str, float]:
     """Score classification predictions.
@@ -59,7 +61,7 @@ def score_classification(
         Ground truth labels.
     predictions : list[str]
         Predicted labels.
-    task_type : str
+    task_type : Literal["binary", "multiclass"]
         One of "binary" or "multiclass".
     choices : list[str] | None
         Ordered list of class labels (needed for AUROC in binary).

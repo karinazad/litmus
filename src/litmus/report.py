@@ -3,6 +3,8 @@
 import json
 from dataclasses import dataclass, asdict
 
+from litmus.tasks._base import Framing, Metric
+
 
 @dataclass
 class TaskResult:
@@ -14,9 +16,9 @@ class TaskResult:
         Name of the task.
     benchmark : str
         Parent benchmark name.
-    framing : str
+    framing : Framing
         How the task was framed for the LLM.
-    metric : str
+    metric : Metric
         Primary metric name.
     score : dict[str, float]
         All computed metric scores.
@@ -30,8 +32,8 @@ class TaskResult:
 
     task_name: str
     benchmark: str
-    framing: str
-    metric: str
+    framing: Framing
+    metric: Metric
     score: dict[str, float]
     n_examples: int
     n_failed: int

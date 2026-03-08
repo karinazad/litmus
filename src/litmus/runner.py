@@ -267,7 +267,7 @@ async def run_eval(
     list[TaskResult]
         Results for each task.
     """
-    use_batch = hasattr(model, "batch_complete")
+    use_batch = isinstance(model, BatchModel)
     results = []
 
     for task in tasks:

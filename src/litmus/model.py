@@ -152,6 +152,113 @@ class APIModel:
             raise last_error  # type: ignore[misc]
 
 
+class AzureModel:
+    """Azure OpenAI async model client with retry and rate limiting.
+
+    Parameters
+    ----------
+    model : str
+        Deployment name (e.g. "gpt-4o"). Defaults to AZURE_OPENAI_DEPLOYMENT_NAME env var.
+    azure_endpoint : str | None
+        Azure endpoint URL. Defaults to AZURE_OPENAI_ENDPOINT env var.
+    api_key : str | None
+        Azure API key. Defaults to AZURE_OPENAI_API_KEY env var.
+    api_version : str | None
+        Azure API version. Defaults to AZURE_OPENAI_API_VERSION env var.
+    max_concurrent : int
+        Maximum number of concurrent API requests.
+    temperature : float
+        Sampling temperature.
+    max_tokens : int
+        Maximum tokens in the response.
+    max_retries : int
+        Maximum number of retries on transient errors.
+    """
+
+    def __init__(
+        self,
+        model: str,
+        azure_endpoint: str | None = None,
+        api_key: str | None = None,
+        api_version: str | None = None,
+        max_concurrent: int = 10,
+        temperature: float = 0.0,
+        max_tokens: int = 1024,
+        max_retries: int = 5,
+    ) -> None:
+        import os
+
+        from openai import AsyncAzureOpenAI
+
+        self.model = model or os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME", "")
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.max_retries = max_retries
+        self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._client = AsyncAzureOpenAI(
+            azure_endpoint=azure_endpoint or os.environ.get("AZURE_OPENAI_ENDPOINT", ""),
+            api_key=api_key or os.environ.get("AZURE_OPENAI_API_KEY"),
+            api_version=api_version or os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-01"),
+        )
+
+    async def complete(self, messages: list[dict[str, str]]) -> str:
+        """Generate a completion with retry and rate limiting.
+
+        Parameters
+        ----------
+        messages : list[dict[str, str]]
+            List of message dicts with "role" and "content" keys.
+
+        Returns
+        -------
+        str
+            The model's response text.
+
+        Raises
+        ------
+        openai.APIError
+            If all retries are exhausted.
+        """
+        from openai import APIError, RateLimitError
+
+        async with self._semaphore:
+            last_error = None
+            for attempt in range(self.max_retries):
+                try:
+                    response = await self._client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens,
+                    )
+                    return response.choices[0].message.content or ""
+                except RateLimitError as e:
+                    last_error = e
+                    wait = 2 ** attempt
+                    logger.warning(
+                        "Rate limited (attempt %d/%d), waiting %ds",
+                        attempt + 1,
+                        self.max_retries,
+                        wait,
+                    )
+                    await asyncio.sleep(wait)
+                except APIError as e:
+                    if e.status_code and e.status_code >= 500:
+                        last_error = e
+                        wait = 2 ** attempt
+                        logger.warning(
+                            "Server error %d (attempt %d/%d), waiting %ds",
+                            e.status_code,
+                            attempt + 1,
+                            self.max_retries,
+                            wait,
+                        )
+                        await asyncio.sleep(wait)
+                    else:
+                        raise
+            raise last_error  # type: ignore[misc]
+
+
 class VLLMModel:
     """vLLM offline inference model with batched generation.
 
@@ -229,7 +336,7 @@ class VLLMModel:
         str
             The model's response text.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         results = await loop.run_in_executor(
             None, self._generate_chat, [messages]
         )
@@ -252,7 +359,7 @@ class VLLMModel:
         list[str]
             List of response texts, one per conversation.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None, self._generate_chat, messages_batch
         )

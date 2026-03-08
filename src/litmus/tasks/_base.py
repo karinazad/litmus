@@ -2,7 +2,11 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Literal
 
+TaskType = Literal["regression", "binary", "multiclass", "multilabel"]
+Framing = Literal["regression", "binary", "binned", "multiclass", "multilabel"]
+Metric = Literal["spearman", "accuracy", "f1_macro"]
 
 SYSTEM_PROMPT = (
     "You are an expert in biology and chemistry. You will be asked to predict "
@@ -22,18 +26,19 @@ class TaskConfig:
         Unique task identifier, e.g. "peer:fluorescence" or "peer:fluorescence:binary".
     benchmark : str
         Parent benchmark name: "peer", "calm", or "moleculeace".
-    task_type : str
+    task_type : TaskType
         Native task type: "regression", "binary", "multiclass", or "multilabel".
-    framing : str
-        How the task is presented to the LLM: "regression", "binary", or "binned".
+    framing : Framing
+        How the task is presented to the LLM: "regression", "binary", "binned",
+        "multiclass", or "multilabel".
     system_prompt : str
         System prompt for the LLM.
     user_prompt_template : str
         Template string with placeholders like {sequence}, {choices}, etc.
     load_fn : Callable
         Callable returning list[dict] with keys "input" and "target".
-    metric : str
-        Primary metric name: "spearman", "accuracy", "f1_macro", etc.
+    metric : Metric
+        Primary metric name: "spearman", "accuracy", "f1_macro".
     choices : list[str] | None
         For classification tasks, the valid class labels.
     target_formatter : Callable | None
@@ -42,11 +47,11 @@ class TaskConfig:
 
     name: str
     benchmark: str
-    task_type: str
-    framing: str
+    task_type: TaskType
+    framing: Framing
     system_prompt: str
     user_prompt_template: str
     load_fn: Callable[[], list[dict]]
-    metric: str
+    metric: Metric
     choices: list[str] | None = None
     target_formatter: Callable | None = None

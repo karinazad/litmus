@@ -4,10 +4,19 @@ import asyncio
 import logging
 import os
 import sys
+from pathlib import Path
 
 import click
 
 from litmus.report import format_csv, format_json, format_markdown
+from litmus.results import (
+    DEFAULT_RESULTS_DIR,
+    build_comparison_table,
+    format_comparison_csv,
+    format_comparison_markdown,
+    load_runs,
+    save_run,
+)
 from litmus.runner import run_eval
 from litmus.tasks import get_tasks
 
@@ -34,7 +43,9 @@ def main() -> None:
 @click.option("--max-concurrent", default=10, type=int, help="Max concurrent API requests (api backend)")
 @click.option("--temperature", default=0.0, type=float, help="Sampling temperature")
 @click.option("--max-tokens", default=1024, type=int, help="Max tokens in model response")
-@click.option("--output", default=None, help="Output file path (JSON)")
+@click.option("--output", default=None, help="Output file path (JSON, legacy)")
+@click.option("--results-dir", default=str(DEFAULT_RESULTS_DIR), help="Directory for structured results", show_default=True)
+@click.option("--no-save", is_flag=True, help="Skip saving results to results directory")
 @click.option("--format", "fmt", default="markdown", type=click.Choice(["markdown", "json", "csv"]))
 @click.option("--verbose", is_flag=True, help="Enable verbose logging")
 # vLLM-specific options
@@ -54,6 +65,8 @@ def eval(
     temperature: float,
     max_tokens: int,
     output: str | None,
+    results_dir: str,
+    no_save: bool,
     fmt: str,
     verbose: bool,
     tensor_parallel_size: int,
@@ -127,10 +140,24 @@ def eval(
 
     click.echo(text)
 
+    # Save structured results
+    if not no_save:
+        path = save_run(
+            results_dir=Path(results_dir),
+            model=model,
+            backend=backend,
+            results=results,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            max_examples=max_examples,
+        )
+        click.echo(f"\nResults saved to {path}")
+
+    # Legacy --output flag
     if output:
         with open(output, "w") as f:
             f.write(format_json(results, include_predictions=True))
-        click.echo(f"\nDetailed results saved to {output}")
+        click.echo(f"Detailed results also saved to {output}")
 
 
 @main.command(name="list")
@@ -148,6 +175,50 @@ def list_tasks(task_filter: str | None, framing: str | None) -> None:
     click.echo("-" * 87)
     for t in sorted(tasks, key=lambda x: x.name):
         click.echo(f"{t.name:<40} {t.benchmark:<15} {t.task_type:<12} {t.framing:<10} {t.metric:<10}")
+
+
+@main.command()
+@click.option("--results-dir", default=str(DEFAULT_RESULTS_DIR), help="Directory with saved results", show_default=True)
+@click.option("--models", default=None, help="Comma-separated model substrings to include")
+@click.option("--tasks", "task_filter", default=None, help="Comma-separated task substrings to include")
+@click.option("--format", "fmt", default="markdown", type=click.Choice(["markdown", "csv"]))
+def compare(results_dir: str, models: str | None, task_filter: str | None, fmt: str) -> None:
+    """Compare results across models from saved runs."""
+    runs = load_runs(Path(results_dir))
+    if not runs:
+        click.echo(f"No results found in {results_dir}/")
+        click.echo("Run 'litmus eval' first to generate results.")
+        sys.exit(1)
+
+    # Filter by model substring
+    if models:
+        model_parts = [m.strip() for m in models.split(",")]
+        runs = [r for r in runs if any(p in r["metadata"]["model"] for p in model_parts)]
+
+    # Filter by task substring (without mutating original dicts)
+    if task_filter:
+        task_parts = [t.strip() for t in task_filter.split(",")]
+        runs = [
+            {**run, "results": [
+                r for r in run["results"]
+                if any(p in r["task_name"] for p in task_parts)
+            ]}
+            for run in runs
+        ]
+        runs = [r for r in runs if r["results"]]
+
+    if not runs:
+        click.echo("No matching results after filtering.")
+        sys.exit(1)
+
+    task_names, model_names, scores, task_metrics = build_comparison_table(runs)
+
+    if fmt == "csv":
+        click.echo(format_comparison_csv(task_names, model_names, scores))
+    else:
+        click.echo(format_comparison_markdown(task_names, model_names, scores, task_metrics))
+
+    click.echo(f"\n{len(model_names)} model(s), {len(task_names)} task(s)")
 
 
 if __name__ == "__main__":

@@ -2,7 +2,39 @@
 
 LLM property prediction benchmark for biological sequences and small molecules.
 
-Litmus evaluates how well language models can predict quantitative and categorical properties of proteins, protein pairs, and molecules. It aggregates tasks from three established benchmarks — **PEER**, **CALM**, and **MoleculeACE** — and presents them to LLMs through a standardized prompt-and-parse pipeline.
+Litmus evaluates how well language models can predict quantitative and categorical properties of proteins, protein pairs, and molecules — testing whether LLMs have internalized scientific knowledge about sequence–function relationships.
+
+## Leaderboard
+
+Results on the full benchmark (all tasks, regression framing, default settings):
+
+| Task | Metric | GPT-4o | Claude Sonnet 4 | Llama 3.1 70B | Gemini 2.5 Pro |
+|------|--------|--------|------------------|---------------|----------------|
+| peer:fluorescence | spearman | - | - | - | - |
+| peer:stability | spearman | - | - | - | - |
+| peer:betalactamase | spearman | - | - | - | - |
+| peer:solubility | accuracy | - | - | - | - |
+| peer:subcellular_localization | accuracy | - | - | - | - |
+| peer:bindingdb | spearman | - | - | - | - |
+| peer:humanppi | accuracy | - | - | - | - |
+| calm:meltome | spearman | - | - | - | - |
+| calm:solubility | spearman | - | - | - | - |
+| calm:localization | f1_macro | - | - | - | - |
+| moleculeace (avg) | spearman | - | - | - | - |
+
+> Run `litmus compare` to generate this table from your own results.
+
+## Quick Start
+
+```bash
+pip install -e .
+
+# Run eval — results auto-saved to litmus_results/
+litmus eval --model gpt-4o --backend api
+
+# Compare models
+litmus compare
+```
 
 ## Benchmarks and Tasks
 
@@ -109,13 +141,35 @@ litmus list
 litmus list --tasks peer --framing binary
 ```
 
+### Compare models
+
+Every `litmus eval` run auto-saves structured results (model metadata + scores + per-example predictions) to `litmus_results/`. Compare across models with:
+
+```bash
+# Compare all saved runs
+litmus compare
+
+# Filter by model or task
+litmus compare --models gpt,claude --tasks fluorescence,stability
+
+# CSV output for further analysis
+litmus compare --format csv > comparison.csv
+```
+
+Skip auto-saving with `--no-save`, or change the directory with `--results-dir`:
+
+```bash
+litmus eval --model gpt-4o --no-save
+litmus eval --model gpt-4o --results-dir my_results/
+```
+
 ### Output formats
 
 ```bash
 litmus eval --model gpt-4o --format markdown   # default, table to stdout
 litmus eval --model gpt-4o --format csv
 litmus eval --model gpt-4o --format json
-litmus eval --model gpt-4o --output results.json  # save detailed results with per-example predictions
+litmus eval --model gpt-4o --output results.json  # also save detailed JSON with per-example predictions
 ```
 
 ## CLI Reference
@@ -124,7 +178,7 @@ litmus eval --model gpt-4o --output results.json  # save detailed results with p
 litmus eval [OPTIONS]
 
   --model TEXT                Model name or HuggingFace ID (required)
-  --backend [api|vllm]       Inference backend (auto-detected if omitted)
+  --backend [api|azure|vllm]  Inference backend (auto-detected if omitted)
   --base-url TEXT             API base URL
   --api-key TEXT              API key (default: OPENAI_API_KEY env var)
   --tasks TEXT                Comma-separated task prefixes to filter
@@ -133,13 +187,27 @@ litmus eval [OPTIONS]
   --max-concurrent INT        Max concurrent API requests (default: 10)
   --temperature FLOAT         Sampling temperature (default: 0.0)
   --max-tokens INT            Max response tokens (default: 1024)
-  --output TEXT               Save JSON results to file
+  --results-dir TEXT          Directory for structured results (default: litmus_results)
+  --no-save                   Skip saving results to results directory
+  --output TEXT               Save detailed JSON to file
   --format [markdown|json|csv]  Output format (default: markdown)
   --verbose                   Enable debug logging
   --tensor-parallel-size INT  GPUs for tensor parallelism (vllm, default: 1)
   --gpu-memory-utilization FLOAT  GPU memory fraction (vllm, default: 0.9)
   --dtype TEXT                Model dtype (vllm, default: auto)
   --max-model-len INT         Max context length (vllm)
+
+litmus compare [OPTIONS]
+
+  --results-dir TEXT          Directory with saved results (default: litmus_results)
+  --models TEXT               Comma-separated model substrings to include
+  --tasks TEXT                Comma-separated task substrings to include
+  --format [markdown|csv]     Output format (default: markdown)
+
+litmus list [OPTIONS]
+
+  --tasks TEXT                Filter by task prefix
+  --framing TEXT              Filter by framing
 ```
 
 ## Scoring
@@ -157,6 +225,7 @@ litmus eval [OPTIONS]
 2. **Prompting** — each example is formatted into a system + user message asking the model to reason and provide an answer in `<answer>` tags
 3. **Parsing** — responses are parsed with tag extraction, float parsing, and fuzzy label matching
 4. **Scoring** — predictions are compared against ground truth using task-appropriate metrics
+5. **Storage** — results are saved as structured JSON with full metadata for cross-model comparison
 
 ## Adding New Tasks
 
@@ -398,6 +467,7 @@ src/litmus/
     parsing.py          # Response parsing: extract_answer, parse_float, parse_label
     scoring.py          # Metrics: regression, classification, multilabel
     report.py           # Output formatting: markdown, JSON, CSV
+    results.py          # Structured results storage and cross-model comparison
     tasks/
         __init__.py     # Task registry and filtering
         _base.py        # TaskConfig dataclass and system prompt

@@ -1,4 +1,4 @@
-# Litmus
+# Litmus 🔴 ➡️ 🔵 
 
 LLM property prediction benchmark for biological sequences and small molecules.
 

@@ -1,10 +1,18 @@
 """PEER benchmark task definitions for Litmus."""
 
+from collections.abc import Callable
 from functools import partial
 
 from litmus.tasks._base import SYSTEM_PROMPT, TaskConfig
 from litmus.tasks._framing import make_binary_task, make_binned_task
 from litmus.tasks._loader import load_peer_task
+
+
+def _make_train_loader(load_fn: Callable, task_name: str) -> Callable[[], list[float]]:
+    """Create a lazy loader that extracts training targets on first call."""
+    def _load() -> list[float]:
+        return [ex["target"] for ex in load_fn(task_name, "train")]
+    return _load
 
 
 # Single-sequence regression tasks
@@ -169,10 +177,9 @@ def register_peer_tasks() -> list[TaskConfig]:
         )
         tasks.append(base)
 
-        train_examples = load_peer_task(name, "train")
-        train_targets = [ex["target"] for ex in train_examples]
-        tasks.append(make_binary_task(base, train_targets))
-        tasks.append(make_binned_task(base, train_targets))
+        train_load_fn = _make_train_loader(load_peer_task, name)
+        tasks.append(make_binary_task(base, train_load_fn))
+        tasks.append(make_binned_task(base, train_load_fn))
 
     # Single-sequence binary tasks
     for name, info in _BINARY_TASKS.items():
@@ -225,10 +232,9 @@ def register_peer_tasks() -> list[TaskConfig]:
         )
         tasks.append(base)
 
-        train_examples = load_peer_task(name, "train")
-        train_targets = [ex["target"] for ex in train_examples]
-        tasks.append(make_binary_task(base, train_targets))
-        tasks.append(make_binned_task(base, train_targets))
+        train_load_fn = _make_train_loader(load_peer_task, name)
+        tasks.append(make_binary_task(base, train_load_fn))
+        tasks.append(make_binned_task(base, train_load_fn))
 
     # PPI regression tasks + variants
     for name, info in _PPI_REGRESSION_TASKS.items():
@@ -244,10 +250,9 @@ def register_peer_tasks() -> list[TaskConfig]:
         )
         tasks.append(base)
 
-        train_examples = load_peer_task(name, "train")
-        train_targets = [ex["target"] for ex in train_examples]
-        tasks.append(make_binary_task(base, train_targets))
-        tasks.append(make_binned_task(base, train_targets))
+        train_load_fn = _make_train_loader(load_peer_task, name)
+        tasks.append(make_binary_task(base, train_load_fn))
+        tasks.append(make_binned_task(base, train_load_fn))
 
     # PPI binary tasks
     for name, info in _PPI_BINARY_TASKS.items():

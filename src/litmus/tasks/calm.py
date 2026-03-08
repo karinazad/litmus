@@ -7,6 +7,13 @@ from litmus.tasks._framing import make_binary_task, make_binned_task
 from litmus.tasks._loader import load_calm_task
 
 
+def _make_train_loader(task_name: str) -> callable:
+    """Create a lazy loader that extracts training targets on first call."""
+    def _load() -> list[float]:
+        return [ex["target"] for ex in load_calm_task(task_name, "train")]
+    return _load
+
+
 _REGRESSION_TASKS = {
     "meltome": {
         "desc": "melting temperature",
@@ -115,10 +122,9 @@ def register_calm_tasks() -> list[TaskConfig]:
         )
         tasks.append(base)
 
-        train_examples = load_calm_task(name, "train")
-        train_targets = [ex["target"] for ex in train_examples]
-        tasks.append(make_binary_task(base, train_targets))
-        tasks.append(make_binned_task(base, train_targets))
+        train_load_fn = _make_train_loader(name)
+        tasks.append(make_binary_task(base, train_load_fn))
+        tasks.append(make_binned_task(base, train_load_fn))
 
     # Multilabel tasks
     for name, info in _MULTILABEL_TASKS.items():

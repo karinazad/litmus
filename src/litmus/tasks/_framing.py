@@ -1,36 +1,47 @@
 """Auto-generate classification framings from regression tasks."""
 
+from collections.abc import Callable
+
 import numpy as np
 
 from litmus.tasks._base import TaskConfig
 
 
-def make_binary_task(base: TaskConfig, train_targets: list[float]) -> TaskConfig:
+def make_binary_task(
+    base: TaskConfig,
+    train_load_fn: Callable[[], list[float]],
+) -> TaskConfig:
     """Create a binary classification variant of a regression task.
 
-    Splits at the median of the training set targets.
+    Splits at the median of the training set targets. The threshold is
+    computed lazily on first use to avoid eager dataset downloads.
 
     Parameters
     ----------
     base : TaskConfig
         The base regression TaskConfig.
-    train_targets : list[float]
-        Target values from the training split (used to compute threshold).
+    train_load_fn : Callable[[], list[float]]
+        Callable returning training target values (used to compute threshold).
 
     Returns
     -------
     TaskConfig
         New TaskConfig with binary framing.
     """
-    threshold = float(np.median(train_targets))
+    _cache: dict[str, float] = {}
+
+    def _get_threshold() -> float:
+        if "threshold" not in _cache:
+            _cache["threshold"] = float(np.median(train_load_fn()))
+        return _cache["threshold"]
 
     def format_target(target: float) -> str:
-        return "high" if target > threshold else "low"
+        return "high" if target > _get_threshold() else "low"
 
     prompt = (
-        f"Is this value high or low?\n"
-        f"High means above {threshold:.4g} (median of known values).\n\n"
-        f"Choices: high, low\n\n"
+        "Is this value high or low?\n"
+        "High means above the median of known values.\n\n"
+        "Choices: high, low\n\n"
         f"{_get_input_section(base)}"
     )
 
@@ -50,19 +61,20 @@ def make_binary_task(base: TaskConfig, train_targets: list[float]) -> TaskConfig
 
 def make_binned_task(
     base: TaskConfig,
-    train_targets: list[float],
+    train_load_fn: Callable[[], list[float]],
     n_bins: int = 4,
 ) -> TaskConfig:
     """Create a binned (multiclass) classification variant of a regression task.
 
-    Splits at quantiles of the training set targets.
+    Splits at quantiles of the training set targets. The bin edges are
+    computed lazily on first use to avoid eager dataset downloads.
 
     Parameters
     ----------
     base : TaskConfig
         The base regression TaskConfig.
-    train_targets : list[float]
-        Target values from the training split (used to compute bin edges).
+    train_load_fn : Callable[[], list[float]]
+        Callable returning training target values (used to compute bin edges).
     n_bins : int
         Number of bins (default 4 for quartiles).
 
@@ -71,32 +83,28 @@ def make_binned_task(
     TaskConfig
         New TaskConfig with binned (multiclass) framing.
     """
-    quantiles = np.linspace(0, 1, n_bins + 1)[1:-1]
-    edges = [float(np.quantile(train_targets, q)) for q in quantiles]
-
     bin_labels = ["very_low", "low", "high", "very_high"]
     if n_bins != 4:
         bin_labels = [f"bin_{i}" for i in range(n_bins)]
 
+    _cache: dict[str, list[float]] = {}
+
+    def _get_edges() -> list[float]:
+        if "edges" not in _cache:
+            train_targets = train_load_fn()
+            quantiles = np.linspace(0, 1, n_bins + 1)[1:-1]
+            _cache["edges"] = [float(np.quantile(train_targets, q)) for q in quantiles]
+        return _cache["edges"]
+
     def format_target(target: float) -> str:
-        for i, edge in enumerate(edges):
+        for i, edge in enumerate(_get_edges()):
             if target <= edge:
                 return bin_labels[i]
         return bin_labels[-1]
 
-    choices_desc = []
-    for i, label in enumerate(bin_labels):
-        if i == 0:
-            choices_desc.append(f"- {label}: below {edges[0]:.4g}")
-        elif i == len(bin_labels) - 1:
-            choices_desc.append(f"- {label}: above {edges[-1]:.4g}")
-        else:
-            choices_desc.append(f"- {label}: {edges[i-1]:.4g} to {edges[i]:.4g}")
-    choices_str = "\n".join(choices_desc)
-
     prompt = (
-        f"Which range does this value fall into?\n\n"
-        f"Choices:\n{choices_str}\n\n"
+        "Which range does this value fall into?\n\n"
+        f"Choices: {', '.join(bin_labels)}\n\n"
         f"{_get_input_section(base)}"
     )
 

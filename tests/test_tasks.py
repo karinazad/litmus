@@ -39,12 +39,12 @@ class TestTaskConfig:
 class TestMakeBinaryTask:
     def test_name(self):
         base = _make_dummy_task()
-        binary = make_binary_task(base, [1.0, 2.0, 3.0, 4.0])
+        binary = make_binary_task(base, lambda: [1.0, 2.0, 3.0, 4.0])
         assert binary.name == "test:dummy:binary"
 
     def test_framing(self):
         base = _make_dummy_task()
-        binary = make_binary_task(base, [1.0, 2.0, 3.0, 4.0])
+        binary = make_binary_task(base, lambda: [1.0, 2.0, 3.0, 4.0])
         assert binary.framing == "binary"
         assert binary.task_type == "binary"
         assert binary.choices == ["high", "low"]
@@ -52,26 +52,26 @@ class TestMakeBinaryTask:
     def test_target_formatter(self):
         base = _make_dummy_task()
         targets = [1.0, 2.0, 3.0, 4.0]
-        binary = make_binary_task(base, targets)
+        binary = make_binary_task(base, lambda: targets)
         median = np.median(targets)
         assert binary.target_formatter(median + 1) == "high"
         assert binary.target_formatter(median - 1) == "low"
 
     def test_metric(self):
         base = _make_dummy_task()
-        binary = make_binary_task(base, [1.0, 2.0, 3.0])
+        binary = make_binary_task(base, lambda: [1.0, 2.0, 3.0])
         assert binary.metric == "accuracy"
 
 
 class TestMakeBinnedTask:
     def test_name(self):
         base = _make_dummy_task()
-        binned = make_binned_task(base, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])
+        binned = make_binned_task(base, lambda: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])
         assert binned.name == "test:dummy:binned"
 
     def test_framing(self):
         base = _make_dummy_task()
-        binned = make_binned_task(base, [1.0, 2.0, 3.0, 4.0])
+        binned = make_binned_task(base, lambda: [1.0, 2.0, 3.0, 4.0])
         assert binned.framing == "binned"
         assert binned.task_type == "multiclass"
         assert binned.choices == ["very_low", "low", "high", "very_high"]
@@ -79,13 +79,13 @@ class TestMakeBinnedTask:
     def test_four_bins(self):
         base = _make_dummy_task()
         targets = list(range(100))
-        binned = make_binned_task(base, targets, n_bins=4)
+        binned = make_binned_task(base, lambda: targets, n_bins=4)
         assert len(binned.choices) == 4
 
     def test_target_formatter_assigns_bins(self):
         base = _make_dummy_task()
         targets = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
-        binned = make_binned_task(base, targets)
+        binned = make_binned_task(base, lambda: targets)
         formatter = binned.target_formatter
         # Very low values should map to "very_low"
         assert formatter(0.0) == "very_low"
@@ -94,5 +94,5 @@ class TestMakeBinnedTask:
 
     def test_metric(self):
         base = _make_dummy_task()
-        binned = make_binned_task(base, [1.0, 2.0, 3.0, 4.0])
+        binned = make_binned_task(base, lambda: [1.0, 2.0, 3.0, 4.0])
         assert binned.metric == "accuracy"

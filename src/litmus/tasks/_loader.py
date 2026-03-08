@@ -18,52 +18,49 @@ def load_peer_task(task: str, split: str = "test") -> list[dict]:
     list[dict]
         List of dicts with "input" and "target" keys.
     """
-    # PEER tasks are organized by category
-    # Single-sequence tasks
-    single_seq_tasks = {
-        "fluorescence": "protein_property",
-        "stability": "protein_property",
-        "betalactamase": "protein_property",
-        "gb1": "protein_property",
-        "aav": "protein_property",
-        "thermostability": "protein_property",
-        "solubility": "protein_property",
-        "binary_localization": "protein_property",
-        "subcellular_localization": "protein_property",
-    }
-    # Paired tasks (protein-ligand or protein-protein)
-    paired_tasks = {
-        "bindingdb": "ligand_binding",
-        "pdbbind": "ligand_binding",
-        "ppiaffinity": "protein_protein",
-        "humanppi": "protein_protein",
-        "yeastppi": "protein_protein",
+    # Maps task name -> (category, hf_folder, target_col, input_type)
+    # input_type: "single", "ligand", or "ppi"
+    _TASK_META = {
+        "fluorescence":            ("function_prediction",          "fluorescence",            "log_fluorescence", "single"),
+        "stability":               ("function_prediction",          "stability",               "stability_score",  "single"),
+        "betalactamase":           ("function_prediction",          "betalactamase",           "scaled_effect1",   "single"),
+        "gb1":                     ("function_prediction",          "gb1",                     "target",           "single"),
+        "aav":                     ("function_prediction",          "aav",                     "target",           "single"),
+        "thermostability":         ("function_prediction",          "thermostability",          "target",           "single"),
+        "solubility":              ("function_prediction",          "solubility",              "solubility",       "single"),
+        "binary_localization":     ("localization_prediction",      "binarylocalization",      "localization",     "single"),
+        "subcellular_localization":("localization_prediction",      "subcellularlocalization", "localization",     "single"),
+        "bindingdb":               ("protein_ligand_interaction",   "bindingdb",               "affinity",         "ligand"),
+        "pdbbind":                 ("protein_ligand_interaction",   "pdbbind",                 "affinity",         "ligand"),
+        "ppiaffinity":             ("protein_protein_interaction",  "ppiaffinity",             "interaction",      "ppi"),
+        "humanppi":                ("protein_protein_interaction",  "humanppi",                "interaction",      "ppi"),
+        "yeastppi":                ("protein_protein_interaction",  "yeastppi",                "interaction",      "ppi"),
     }
 
-    if task in single_seq_tasks:
-        category = single_seq_tasks[task]
-    elif task in paired_tasks:
-        category = paired_tasks[task]
-    else:
+    if task not in _TASK_META:
         raise ValueError(f"Unknown PEER task: {task}")
+
+    category, folder, target_col, input_type = _TASK_META[task]
 
     ds = load_dataset(
         "taylor-joren/peer",
-        data_files=f"{category}/{task}/{split}.parquet",
+        data_files=f"{category}/{folder}/{split}.parquet",
         split="train",  # load_dataset returns "train" when loading from data_files
     )
 
     examples = []
     for row in ds:
-        if task in paired_tasks:
-            # Paired tasks have two sequence columns
-            if task in ("bindingdb", "pdbbind"):
-                inp = {"protein": row["protein"], "ligand": row["ligand"]}
-            else:
-                inp = {"protein1": row["protein1"], "protein2": row["protein2"]}
+        if input_type == "ligand":
+            inp = {"protein": row["protein_sequence"], "ligand": row["ligand_smiles"]}
+        elif input_type == "ppi":
+            inp = {"protein1": row["protein1_sequence"], "protein2": row["protein2_sequence"]}
         else:
-            inp = row["sequence"]
-        examples.append({"input": inp, "target": row["target"]})
+            inp = row["protein_sequence"]
+        target = row[target_col]
+        # Some columns store scalars in single-element lists
+        if isinstance(target, list):
+            target = target[0]
+        examples.append({"input": inp, "target": target})
 
     return examples
 

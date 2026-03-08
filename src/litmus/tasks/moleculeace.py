@@ -7,6 +7,13 @@ from litmus.tasks._framing import make_binary_task, make_binned_task
 from litmus.tasks._loader import load_moleculeace_task
 
 
+def _make_train_loader(chembl_id: str) -> callable:
+    """Create a lazy loader that extracts training targets on first call."""
+    def _load() -> list[float]:
+        return [ex["target"] for ex in load_moleculeace_task(chembl_id, "train")]
+    return _load
+
+
 # All 30 ChEMBL targets in MoleculeACE
 CHEMBL_TARGETS = [
     "CHEMBL2034",
@@ -73,9 +80,8 @@ def register_moleculeace_tasks() -> list[TaskConfig]:
         )
         tasks.append(base)
 
-        train_examples = load_moleculeace_task(chembl_id, "train")
-        train_targets = [ex["target"] for ex in train_examples]
-        tasks.append(make_binary_task(base, train_targets))
-        tasks.append(make_binned_task(base, train_targets))
+        train_load_fn = _make_train_loader(chembl_id)
+        tasks.append(make_binary_task(base, train_load_fn))
+        tasks.append(make_binned_task(base, train_load_fn))
 
     return tasks

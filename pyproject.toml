@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "litmus"
+version = "0.1.0"
+description = "LLM Property Prediction Benchmark for biological and chemical sequences"
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=1.0",
+    "datasets>=2.0",
+    "scikit-learn>=1.0",
+    "scipy>=1.7",
+    "pandas>=1.5",
+    "click>=8.0",
+]
+
+[project.optional-dependencies]
+vllm = ["vllm>=0.6.0"]
+
+[project.scripts]
+litmus = "litmus.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/litmus"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

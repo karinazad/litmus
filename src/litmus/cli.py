@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import sys
 
 import click
@@ -73,7 +74,6 @@ def eval(
 
     # Auto-detect backend
     if backend is None:
-        import os
         if os.environ.get("AZURE_OPENAI_ENDPOINT"):
             backend = "azure"
         elif base_url or api_key:

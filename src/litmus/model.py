@@ -51,6 +51,84 @@ class BatchModel(Protocol):
         ...
 
 
+async def _complete_with_retry(
+    client: object,
+    model: str,
+    messages: list[dict[str, str]],
+    temperature: float,
+    max_tokens: int,
+    max_retries: int,
+    semaphore: asyncio.Semaphore,
+) -> str:
+    """Generate a chat completion with retry and rate limiting.
+
+    Parameters
+    ----------
+    client : AsyncOpenAI | AsyncAzureOpenAI
+        The OpenAI-compatible async client.
+    model : str
+        Model or deployment name.
+    messages : list[dict[str, str]]
+        List of message dicts with "role" and "content" keys.
+    temperature : float
+        Sampling temperature.
+    max_tokens : int
+        Maximum tokens in the response.
+    max_retries : int
+        Maximum number of retries on transient errors.
+    semaphore : asyncio.Semaphore
+        Concurrency limiter.
+
+    Returns
+    -------
+    str
+        The model's response text.
+
+    Raises
+    ------
+    openai.APIError
+        If all retries are exhausted.
+    """
+    from openai import APIError, RateLimitError
+
+    async with semaphore:
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                return response.choices[0].message.content or ""
+            except RateLimitError as e:
+                last_error = e
+                wait = 2 ** attempt
+                logger.warning(
+                    "Rate limited (attempt %d/%d), waiting %ds",
+                    attempt + 1,
+                    max_retries,
+                    wait,
+                )
+                await asyncio.sleep(wait)
+            except APIError as e:
+                if e.status_code and e.status_code >= 500:
+                    last_error = e
+                    wait = 2 ** attempt
+                    logger.warning(
+                        "Server error %d (attempt %d/%d), waiting %ds",
+                        e.status_code,
+                        attempt + 1,
+                        max_retries,
+                        wait,
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    raise
+        raise last_error  # type: ignore[misc]
+
+
 class APIModel:
     """OpenAI-compatible async model client with retry and rate limiting.
 
@@ -95,70 +173,23 @@ class APIModel:
         )
 
     async def complete(self, messages: list[dict[str, str]]) -> str:
-        """Generate a completion with retry and rate limiting.
-
-        Parameters
-        ----------
-        messages : list[dict[str, str]]
-            List of message dicts with "role" and "content" keys.
-
-        Returns
-        -------
-        str
-            The model's response text.
-
-        Raises
-        ------
-        openai.APIError
-            If all retries are exhausted.
-        """
-        from openai import APIError, RateLimitError
-
-        async with self._semaphore:
-            last_error = None
-            for attempt in range(self.max_retries):
-                try:
-                    response = await self._client.chat.completions.create(
-                        model=self.model,
-                        messages=messages,
-                        temperature=self.temperature,
-                        max_tokens=self.max_tokens,
-                    )
-                    return response.choices[0].message.content or ""
-                except RateLimitError as e:
-                    last_error = e
-                    wait = 2 ** attempt
-                    logger.warning(
-                        "Rate limited (attempt %d/%d), waiting %ds",
-                        attempt + 1,
-                        self.max_retries,
-                        wait,
-                    )
-                    await asyncio.sleep(wait)
-                except APIError as e:
-                    if e.status_code and e.status_code >= 500:
-                        last_error = e
-                        wait = 2 ** attempt
-                        logger.warning(
-                            "Server error %d (attempt %d/%d), waiting %ds",
-                            e.status_code,
-                            attempt + 1,
-                            self.max_retries,
-                            wait,
-                        )
-                        await asyncio.sleep(wait)
-                    else:
-                        raise
-            raise last_error  # type: ignore[misc]
+        return await _complete_with_retry(
+            self._client, self.model, messages,
+            self.temperature, self.max_tokens, self.max_retries, self._semaphore,
+        )
 
 
 class AzureModel:
     """Azure OpenAI async model client with retry and rate limiting.
 
+    Uses ``AsyncAzureOpenAI`` which reads ``AZURE_OPENAI_ENDPOINT``,
+    ``AZURE_OPENAI_API_KEY``, and ``AZURE_OPENAI_API_VERSION`` from
+    the environment by default.
+
     Parameters
     ----------
     model : str
-        Deployment name (e.g. "gpt-4o"). Defaults to AZURE_OPENAI_DEPLOYMENT_NAME env var.
+        Azure deployment name, e.g. "gpt-4o".
     azure_endpoint : str | None
         Azure endpoint URL. Defaults to AZURE_OPENAI_ENDPOINT env var.
     api_key : str | None
@@ -190,73 +221,30 @@ class AzureModel:
 
         from openai import AsyncAzureOpenAI
 
-        self.model = model or os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME", "")
+        self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.max_retries = max_retries
         self._semaphore = asyncio.Semaphore(max_concurrent)
+
+        # Resolve api_version from multiple env var conventions
+        resolved_api_version = (
+            api_version
+            or os.environ.get("AZURE_OPENAI_API_VERSION")
+            or os.environ.get("OPENAI_API_VERSION")
+        )
+
         self._client = AsyncAzureOpenAI(
-            azure_endpoint=azure_endpoint or os.environ.get("AZURE_OPENAI_ENDPOINT", ""),
-            api_key=api_key or os.environ.get("AZURE_OPENAI_API_KEY"),
-            api_version=api_version or os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-01"),
+            azure_endpoint=azure_endpoint,
+            api_key=api_key,
+            api_version=resolved_api_version,
         )
 
     async def complete(self, messages: list[dict[str, str]]) -> str:
-        """Generate a completion with retry and rate limiting.
-
-        Parameters
-        ----------
-        messages : list[dict[str, str]]
-            List of message dicts with "role" and "content" keys.
-
-        Returns
-        -------
-        str
-            The model's response text.
-
-        Raises
-        ------
-        openai.APIError
-            If all retries are exhausted.
-        """
-        from openai import APIError, RateLimitError
-
-        async with self._semaphore:
-            last_error = None
-            for attempt in range(self.max_retries):
-                try:
-                    response = await self._client.chat.completions.create(
-                        model=self.model,
-                        messages=messages,
-                        temperature=self.temperature,
-                        max_tokens=self.max_tokens,
-                    )
-                    return response.choices[0].message.content or ""
-                except RateLimitError as e:
-                    last_error = e
-                    wait = 2 ** attempt
-                    logger.warning(
-                        "Rate limited (attempt %d/%d), waiting %ds",
-                        attempt + 1,
-                        self.max_retries,
-                        wait,
-                    )
-                    await asyncio.sleep(wait)
-                except APIError as e:
-                    if e.status_code and e.status_code >= 500:
-                        last_error = e
-                        wait = 2 ** attempt
-                        logger.warning(
-                            "Server error %d (attempt %d/%d), waiting %ds",
-                            e.status_code,
-                            attempt + 1,
-                            self.max_retries,
-                            wait,
-                        )
-                        await asyncio.sleep(wait)
-                    else:
-                        raise
-            raise last_error  # type: ignore[misc]
+        return await _complete_with_retry(
+            self._client, self.model, messages,
+            self.temperature, self.max_tokens, self.max_retries, self._semaphore,
+        )
 
 
 class VLLMModel:
